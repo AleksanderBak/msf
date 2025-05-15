@@ -1,0 +1,21 @@
+[project]
+name = "msf"
+version = "0.1.0"
+description = "Malleable Scheduling Framework"
+authors = [
+    {name="Aleksander Bąk", email="aleksander.bak@student.put.poznan.pl"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "loguru>=0.7.3",
+    "plotly>=6.0.1",
+    "plotly-express>=0.4.1",
+    "pydantic>=2.11.3",
+    "pydantic-settings>=2.9.1",
+    "pytest>=8.3.5",
+    "seaborn>=0.13.2",
+]
+
+# [tool.uv]
+# package = true
