@@ -1,12 +1,11 @@
 import datetime
 import json
-import logging
 import random
 from pathlib import Path
 
 from loguru import logger
 
-from src.speed_generator import ProcessingTimesGenerator
+from msf.speed_generator import ProcessingTimesGenerator
 
 
 class InstanceGenerator:
@@ -53,11 +52,9 @@ class InstanceGenerator:
             for j in range(1, n + 1):
                 tasks[f"task_{j}"] = {
                     "work_amount": round(random.uniform(25.0, 100.0), 4),
-                    # "speed_up": ProcessingTimesGenerator.get_linear_speeds(
-                    #     m, seed=seed
-                    # ),
-                    "speed_up_factors": times_generator.get_concave_speeds(
-                        n_processors=m
+                    "speed_up_factors": times_generator.generate_speedup_factors(
+                        n=n,
+                        growth_aggressiveness=0.7,
                     ),
                 }
 

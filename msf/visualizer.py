@@ -1,3 +1,4 @@
+import collections
 import os
 
 import matplotlib.colors as mcolors
@@ -6,7 +7,8 @@ import numpy as np
 import seaborn as sns
 from loguru import logger
 
-from src.settings import settings
+from msf.config.settings import settings
+from msf.utils.models import FinalSchedule
 
 PLOT_DIR = settings.visualization_dir
 
@@ -15,27 +17,88 @@ class Visualizer:
     def __init__(self):
         pass
 
+    def _create_consistent_interval(
+        self,
+        prev_interval_data,
+        current_task_requirements,
+        t_start,
+        t_end,
+    ):
+        if not prev_interval_data or not prev_interval_data[0]:
+            new_schedule = []
+            next_proc_id = 0
+            for task_id, count in sorted(current_task_requirements.items()):
+                for _ in range(count):
+                    new_schedule.append(
+                        {
+                            "processor_id": next_proc_id,
+                            "start_time": t_start,
+                            "end_time": t_end,
+                            "task_id": task_id,
+                        }
+                    )
+                    next_proc_id += 1
+            return [new_schedule]
+
+        last_schedule = prev_interval_data[0]
+        previous_assignments = collections.defaultdict(list)
+        all_previous_procs = set()
+        for assignment in last_schedule:
+            previous_assignments[assignment["task_id"]].append(
+                assignment["processor_id"]
+            )
+            all_previous_procs.add(assignment["processor_id"])
+
+        for task_id in previous_assignments:
+            previous_assignments[task_id].sort()
+
+        new_assignments = {}
+        available_processors = []
+        processors_to_keep = set()
+
+        for task_id, required_count in current_task_requirements.items():
+            if task_id in previous_assignments:
+                old_procs = previous_assignments[task_id]
+                procs_to_use = old_procs[:required_count]
+                procs_to_free = old_procs[required_count:]
+                new_assignments[task_id] = procs_to_use
+                processors_to_keep.update(procs_to_use)
+                available_processors.extend(procs_to_free)
+
+        freed_by_task_disappearance = all_previous_procs - processors_to_keep
+        available_processors.extend(list(freed_by_task_disappearance))
+        available_processors.sort()
+
+        for task_id, required_count in current_task_requirements.items():
+            needed_more = required_count - len(new_assignments.get(task_id, []))
+            if needed_more > 0:
+                procs_to_add = available_processors[:needed_more]
+                available_processors = available_processors[needed_more:]
+                new_assignments.setdefault(task_id, []).extend(procs_to_add)
+
+        next_interval_schedule = []
+        for task_id, proc_list in new_assignments.items():
+            for proc_id in proc_list:
+                next_interval_schedule.append(
+                    {
+                        "processor_id": proc_id,
+                        "start_time": t_start,
+                        "end_time": t_end,
+                        "task_id": task_id,
+                    }
+                )
+        next_interval_schedule.sort(key=lambda x: x["processor_id"])
+        return [next_interval_schedule]
+
     def visualize_schedule_by_processor(
         self,
-        schedule_log: list[dict],
-        m: int,
-        makespan: float,
+        schedule: FinalSchedule,
+        save_to_file: bool = True,
         filename: str = "gantt_chart_by_processor.png",
-        show: bool = False,
     ) -> None:
-        """
-        Generates a Gantt chart where the Y-axis represents individual processors.
-
-        Args:
-            schedule_log (list): List of schedule interval dictionaries.
-                                Each dict: {'task_id', 'start_time', 'end_time', 'num_processors'}
-            m (int): The total number of processors.
-            makespan (float): The total makespan of the schedule.
-            filename (str): Name of the file to save the plot.
-        """
-        if not schedule_log:
-            logger.warning("Schedule log is empty, cannot generate visualization.")
-            return
+        schedule_log = schedule.schedule
+        makespan = schedule.makespan
+        m = schedule.num_processors
 
         # --- 1. Identify Time Intervals ---
         time_points = set([0.0, makespan])
@@ -63,66 +126,61 @@ class Visualizer:
             return
 
         plot_data = []
-        tasks = sorted(list(set(item["task_id"] for item in schedule_log)))
+        unique_tasks = sorted({item["task_id"] for item in schedule_log})
         colors = list(mcolors.TABLEAU_COLORS.values())
-        task_colors = {
-            task_id: colors[i % len(colors)] for i, task_id in enumerate(tasks)
-        }
+        task_colors = dict(zip(unique_tasks, colors[: len(unique_tasks)]))
         task_colors["idle"] = "lightgrey"
 
-        for i in range(len(unique_times) - 1):
-            t_start = unique_times[i]
-            t_end = unique_times[i + 1]
-            duration = t_end - t_start
+        prev_interval_data = []
+        intervals = []
 
-            if duration <= 1e-9:
+        for i in range(len(unique_times) - 1):
+            t_start, t_end = unique_times[i], unique_times[i + 1]
+
+            if t_end - t_start <= 1e-9:
                 continue
 
-            active_tasks_in_interval = []
+            current_task_requirements = collections.defaultdict(int)
             for entry in schedule_log:
-                if entry["start_time"] < t_end and entry["end_time"] > t_start:
-                    active_tasks_in_interval.append(
+                if entry["start_time"] <= t_start and entry["end_time"] >= t_end:
+                    current_task_requirements[entry["task_id"]] += entry[
+                        "num_processors"
+                    ]
+
+            if not current_task_requirements:
+                prev_interval_data = []
+                continue
+
+            next_interval = self._create_consistent_interval(
+                prev_interval_data,
+                current_task_requirements,
+                t_start,
+                t_end,
+            )
+            prev_interval_data = next_interval
+
+            used_processors = set()
+            for assignment in next_interval[0]:
+                used_processors.add(assignment["processor_id"])
+
+            plot_interval = []
+            for processor in range(m):
+                if processor not in used_processors:
+                    plot_interval.append(
                         {
-                            "task_id": entry["task_id"],
-                            "num_processors": entry["num_processors"],
-                        }
-                    )
-
-            current_processor_id = 0
-            processors_used_in_interval = set()
-
-            active_tasks_in_interval.sort(key=lambda x: x["task_id"])
-
-            for task_info in active_tasks_in_interval:
-                task_id = task_info["task_id"]
-                num_procs = task_info["num_processors"]
-
-                for p_offset in range(num_procs):
-                    processor_to_assign = current_processor_id + p_offset
-                    plot_data.append(
-                        {
-                            "processor_id": processor_to_assign,
-                            "start_time": t_start,
-                            "end_time": t_end,
-                            "task_id": task_id,
-                        }
-                    )
-                    processors_used_in_interval.add(processor_to_assign)
-
-                current_processor_id += num_procs
-                if current_processor_id >= m:
-                    break
-
-            for p_id in range(m):
-                if p_id not in processors_used_in_interval:
-                    plot_data.append(
-                        {
-                            "processor_id": p_id,
+                            "processor_id": processor,
                             "start_time": t_start,
                             "end_time": t_end,
                             "task_id": "idle",
                         }
                     )
+            plot_interval.extend(next_interval[0])
+
+            plot_data.extend(plot_interval)
+            # print("Next interval:")
+            # for interval in next_interval:
+            #     print(interval)
+            # print("-" * 100)
 
         # --- 4. Plot ---
         fig, ax = plt.subplots(
@@ -199,9 +257,6 @@ class Visualizer:
             plt.savefig(os.path.join(PLOT_DIR, filename))
         except Exception as e:
             print(f"Error saving processor-centric schedule chart: {e}")
-
-        if show:
-            plt.show()
 
     def visualize_schedule(
         self,

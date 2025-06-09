@@ -1,0 +1,49 @@
+{
+  "num_processors": 8,
+  "num_tasks": 5,
+  "makespan": 116.07692307692307,
+  "schedule": [
+    {
+      "task_id": "T3",
+      "start_time": 0.0,
+      "end_time": 30.76923076923077,
+      "num_processors": 4
+    },
+    {
+      "task_id": "T4",
+      "start_time": 0.0,
+      "end_time": 25.0,
+      "num_processors": 4
+    },
+    {
+      "task_id": "T1",
+      "start_time": 25.0,
+      "end_time": 75.0,
+      "num_processors": 3
+    },
+    {
+      "task_id": "T2",
+      "start_time": 25.0,
+      "end_time": 30.76923076923077,
+      "num_processors": 1
+    },
+    {
+      "task_id": "T2",
+      "start_time": 30.76923076923077,
+      "end_time": 80.25641025641025,
+      "num_processors": 2
+    },
+    {
+      "task_id": "T5",
+      "start_time": 30.76923076923077,
+      "end_time": 75.0,
+      "num_processors": 3
+    },
+    {
+      "task_id": "T5",
+      "start_time": 75.0,
+      "end_time": 116.07692307692307,
+      "num_processors": 4
+    }
+  ]
+}

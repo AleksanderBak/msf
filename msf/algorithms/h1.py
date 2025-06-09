@@ -1,10 +1,10 @@
-import json
 import math
 from enum import Enum
 
 from loguru import logger
 
-from src.settings import settings
+from msf.config.settings import settings
+from msf.utils.models import FinalSchedule
 
 
 class CandidateAction(str, Enum):
@@ -132,14 +132,23 @@ def get_candidate_allocations(
     return candidates
 
 
-def h1_algorithm(m: int, n: int, tasks: list[Task]):
+def h1_algorithm(m: int, n: int, tasks_dict: dict[str, dict]) -> FinalSchedule:
     """
     Greedy algorithm for malleable job scheduling (minimize makespan).
     Returns the makespan and a detailed schedule log.
     """
+
+    tasks = {
+        task_id: Task(
+            id=task_id,
+            work_amount=task["work_amount"],
+            speed_up_factors=task["speed_up_factors"],
+        )
+        for task_id, task in tasks_dict.items()
+    }
     current_time = 0.0
     free_processors = m
-    waiting_tasks = {task.id: task for task in tasks}
+    waiting_tasks = {task.id: task for task in tasks.values()}
     running_tasks = {}
     completed_count = 0
     schedule_log = []
@@ -272,4 +281,7 @@ def h1_algorithm(m: int, n: int, tasks: list[Task]):
         logger.error("Some tasks still have active intervals after completion")
 
     schedule_log.sort(key=lambda x: (x["start_time"], x["task_id"]))
-    return current_time, schedule_log
+
+    return FinalSchedule(
+        makespan=current_time, schedule=schedule_log, num_processors=m, num_tasks=n
+    )

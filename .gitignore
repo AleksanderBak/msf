@@ -11,3 +11,8 @@ ruff.toml
 _instances
 
 .env
+
+*/.egg-info
+
+
+.vscode

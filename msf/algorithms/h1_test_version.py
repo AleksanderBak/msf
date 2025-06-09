@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from loguru import logger
 
-from src.settings import settings
-from src.visualizer import Visualizer
+from msf.config.settings import settings
+from msf.visualizer import Visualizer
 
 
 class CandidateAction(str, Enum):

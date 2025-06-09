@@ -1,10 +1,14 @@
 import copy
 import math
 import random
+from collections import deque
 from enum import Enum
 from typing import Any
 
-from src.settings import settings
+from loguru import logger
+
+from msf.config.settings import settings
+from msf.utils.helpers import FinalSchedule
 
 NEXT_SEGMENT_UID_COUNTER = 0
 
@@ -22,7 +26,7 @@ class Segment:
     def __repr__(self):
         return (
             f"Segment(id={self.segment_id}, task={self.task_id}, "
-            f"P={self.processors}, W={self.work_amount_segment:.2f})"
+            f"P={self.processors}, W={self.work_amount_segment:.4f})"
         )
 
 
@@ -100,7 +104,7 @@ def decode_solution(
     global_segment_order_ids: list[str],
     m_total_processors: int,
     task_info_map: dict[str, Any],
-) -> tuple[list[ScheduledSegmentOutput], float]:
+) -> tuple[list[ScheduledSegmentOutput], float] | tuple[None, None]:
     """
     Constructs a schedule from the solution representation.
 
@@ -119,21 +123,11 @@ def decode_solution(
     # processor_finish_times[i] = time when physical system processor 'i' becomes free
     processor_finish_times = [0.0] * m_total_processors
 
-    # Create a flat list of actual Segment objects in the specified global order
-    segments_to_schedule = []
-    for seg_id in global_segment_order_ids:
-        found = False
-        for task_id_key in solution_task_segments_map:
-            for seg_obj in solution_task_segments_map[task_id_key]:
-                if seg_obj.segment_id == seg_id:
-                    segments_to_schedule.append(seg_obj)
-                    found = True
-                    break
-            if found:
-                break
-        if not found:  # Should not happen if data is consistent
-            # print(f"Error: Segment ID {seg_id} from global order not found in segment map.")
-            return [], float("inf")
+    segments_to_schedule = [
+        segment
+        for _, segment_list in solution_task_segments_map.items()
+        for segment in segment_list
+    ]
 
     for segment_to_place in segments_to_schedule:
         segment_to_place.duration = get_segment_duration(
@@ -145,7 +139,10 @@ def decode_solution(
             or segment_to_place.processors <= 0
             or segment_to_place.processors > m_total_processors
         ):
-            return [], float("inf")  # Invalid segment implies infinitely bad schedule
+            logger.error(
+                f"Invalid segment: {segment_to_place}. Returning empty schedule."
+            )
+            return None, None
 
         num_procs_needed = segment_to_place.processors
 
@@ -348,7 +345,10 @@ def get_neighbor_solution(
             task_id, segment_to_split = find_segment_and_task(
                 seg_id_to_split, new_segments_map
             )
-            if segment_to_split.work_amount_segment > settings.epsilon:
+            if (
+                segment_to_split
+                and segment_to_split.work_amount_segment > settings.epsilon
+            ):
                 original_work = segment_to_split.work_amount_segment
                 split_ratio = random.uniform(0.25, 0.75)
 
@@ -479,7 +479,9 @@ def simulated_annealing(
     n_tasks, processor_num, task_info_map = load_instance_data(instance_data)
 
     current_segments_map, current_global_order = generate_initial_solution(
-        task_info_map, processor_num, initial_segments_per_task=None
+        task_info_map,
+        processor_num,
+        initial_segments_per_task=initial_segments_per_task,
     )
     current_schedule_list, current_makespan = decode_solution(
         current_segments_map, current_global_order, processor_num, task_info_map
@@ -521,8 +523,8 @@ def simulated_annealing(
                 current_schedule_list = neighbor_schedule_list
 
                 if current_makespan < best_makespan:
-                    # best_segments_map = copy.deepcopy(current_segments_map)
-                    # best_global_order = list(current_global_order)
+                    best_segments_map = copy.deepcopy(current_segments_map)
+                    best_global_order = list(current_global_order)
                     best_makespan = current_makespan
                     best_schedule_list = list(current_schedule_list)
             else:
@@ -543,5 +545,25 @@ def simulated_annealing(
                     f"Iter {total_iterations}, T={temperature:.2f}, Best makespan={best_makespan:.4f}"
                 )
 
+    final_segments_map, final_global_order = (
+        best_segments_map,
+        best_global_order,
+    )
+
+    # final_schedule_compact_list, final_makespan_compact = (
+    #     decode_solution_with_gap_filling(
+    #         final_segments_map, final_global_order, processor_num, task_info_map
+    #     )
+    # )
+
+    print(final_segments_map, final_global_order)
     print(f"\nFinished SA. Total iterations: {total_iterations}")
-    return [s.to_dict() for s in best_schedule_list], best_makespan
+
+    result = FinalSchedule(
+        schedule=[s.to_dict() for s in best_schedule_list],
+        makespan=best_makespan if best_makespan else 0,
+        num_processors=processor_num,
+        num_tasks=n_tasks,
+    )
+
+    return result
