@@ -27,7 +27,7 @@ def validate_schedule(schedule: FinalSchedule, instance_data: dict) -> bool:
             return False
 
         used_processors = 0
-        print(tasks)
+
         for task in tasks:
             used_processors += task["num_processors"]
             work_amount = (end_time - start_time) * instance_data["tasks"][
@@ -65,4 +65,5 @@ def validate_schedule(schedule: FinalSchedule, instance_data: dict) -> bool:
         )
         return False
 
+    logger.success("Schedule is valid")
     return True

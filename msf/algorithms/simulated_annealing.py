@@ -8,7 +8,7 @@ from typing import Any
 from loguru import logger
 
 from msf.config.settings import settings
-from msf.utils.helpers import FinalSchedule
+from msf.utils.helpers import FinalSchedule, group_intervals
 
 NEXT_SEGMENT_UID_COUNTER = 0
 
@@ -35,13 +35,15 @@ class Segment:
 class ScheduledSegmentOutput:
     """Represents a segment placed on the schedule, for final output."""
 
-    def __init__(self, task_id, start_time, end_time, num_processors):
+    def __init__(
+        self, task_id: str, start_time: float, end_time: float, num_processors: int
+    ):
         self.task_id = task_id
         self.start_time = start_time
         self.end_time = end_time
         self.num_processors = num_processors
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "start_time": self.start_time,
@@ -67,7 +69,9 @@ def get_next_segment_uid() -> str:
     return f"s{NEXT_SEGMENT_UID_COUNTER}"
 
 
-def load_instance_data(instance_json) -> tuple[int, int, dict[str, Any]]:
+def load_instance_data(
+    instance_json: dict[str, Any],
+) -> tuple[int, int, dict[str, Any]]:
     n_tasks = instance_json["n"]
     m_processors = instance_json["m"]
     task_details_map = {}
@@ -87,118 +91,242 @@ def load_instance_data(instance_json) -> tuple[int, int, dict[str, Any]]:
     return n_tasks, m_processors, task_details_map
 
 
-def get_segment_duration(segment: Segment, task_info_map: dict[str, Any]) -> float:
-    task_id = segment.task_id
-    speedup_idx = segment.processors - 1
-    speedup = task_info_map[task_id]["speed_up_factors"][speedup_idx]
+def get_segment_duration(
+    task_id: str, work_amount: float, task_info_map: dict[str, Any], processors: int
+) -> float:
+    speedup = task_info_map[task_id]["speed_up_factors"][processors - 1]
 
-    return segment.work_amount_segment / speedup
+    return work_amount / speedup
 
 
-def decode_solution(
-    solution_task_segments_map: dict[str, list[Segment]],
-    global_segment_order_ids: list[str],
-    m_total_processors: int,
-    task_info_map: dict[str, Any],
-) -> tuple[list[ScheduledSegmentOutput], float] | tuple[None, None]:
-    """
-    Constructs a schedule from the solution representation.
+class SegmentScheduler:
+    def __init__(self, total_processors: int, task_info_map: dict[str, Any]):
+        self.total_processors = total_processors
+        self.task_info_map = task_info_map
 
-    Args:
-        solution_task_segments_map: dict[str, list[Segment]] - Solution task segments map.
-        global_segment_order_ids: list[str] - Global segment order IDs.
-        m_total_processors: int - Total number of processors.
-        task_info_map: dict[str, Any] - Task information map.
+    def _flush_running_tasks(
+        self,
+        interval_start: float,
+        running_tasks: dict[str, Any],
+        available_processors: int,
+        schedule: list[ScheduledSegmentOutput],
+    ) -> tuple[dict[str, Any], int, float]:
+        tasks_to_finish = []
+        interval_end = min(task["end_time"] for task in running_tasks.values())
 
-    Returns:
-        tuple[list[ScheduledSegmentOutput], float] - Scheduled outputs and makespan.
-    """
-    scheduled_outputs = []
-    makespan = 0.0
-
-    # processor_finish_times[i] = time when physical system processor 'i' becomes free
-    processor_finish_times = [0.0] * m_total_processors
-
-    segments_to_schedule = [
-        segment
-        for _, segment_list in solution_task_segments_map.items()
-        for segment in segment_list
-    ]
-
-    for segment_to_place in segments_to_schedule:
-        segment_to_place.duration = get_segment_duration(
-            segment_to_place, task_info_map
-        )
-
-        if (
-            segment_to_place.duration == float("inf")
-            or segment_to_place.processors <= 0
-            or segment_to_place.processors > m_total_processors
-        ):
-            logger.error(
-                f"Invalid segment: {segment_to_place}. Returning empty schedule."
+        for task_id, task_info in running_tasks.items():
+            schedule.append(
+                ScheduledSegmentOutput(
+                    task_id=task_id,
+                    start_time=interval_start,
+                    end_time=interval_end,
+                    num_processors=task_info["processors_to_use"],
+                )
             )
-            return None, None
+            if task_info["end_time"] == interval_end:
+                tasks_to_finish.append(task_id)
+                available_processors += task_info["processors_to_use"]
 
-        num_procs_needed = segment_to_place.processors
+        for task_id in tasks_to_finish:
+            running_tasks.pop(task_id)
 
-        earliest_start_time = 0.0
-        assigned_proc_indices = []
+        new_interval_start = interval_end
+        return running_tasks, available_processors, new_interval_start
 
-        # Find the earliest time this segment can start (Greedy Approach)
-        # Iterate through all unique processor finish times as potential start points
-        # This ensures we check event points where processor availability might change.
-        distinct_finish_times = sorted(list(set(processor_finish_times)))
-        candidate_start_times = [0.0] + [
-            t for t in distinct_finish_times if t > 1e-9
-        ]  # Add 0 and positive finish times
+    def _find_next_segment(
+        self, segments, segments_to_schedule, running_tasks, available_processors
+    ) -> str:
+        def can_schedule_with_constraints(seg_id: str) -> bool:
+            segment = segments[seg_id]
+            task_id = segment.task_id
 
-        best_t_start_for_segment = float("inf")
+            if task_id not in running_tasks:
+                return segment.processors <= available_processors
 
-        for t_candidate in candidate_start_times:
-            available_procs_at_t_candidate = []
-            for proc_idx in range(m_total_processors):
-                if (
-                    processor_finish_times[proc_idx] <= t_candidate + 1e-9
-                ):  # Check if proc is free by t_candidate
-                    available_procs_at_t_candidate.append(proc_idx)
-
-            if len(available_procs_at_t_candidate) >= num_procs_needed:
-                # Found enough processors. This t_candidate is a valid start time.
-                best_t_start_for_segment = t_candidate
-                assigned_proc_indices = available_procs_at_t_candidate[
-                    :num_procs_needed
-                ]
-                break  # Found the earliest possible, due to sorted candidate_start_times
-
-        if not assigned_proc_indices:  # Should only happen if num_procs_needed > m_total_processors (checked) or logic error
-            # print(f"Decoder Error: Could not find slot for segment {segment_to_place}")
-            return [], float("inf")
-
-        earliest_start_time = best_t_start_for_segment
-        segment_end_time = earliest_start_time + segment_to_place.duration
-
-        # Update finish times for the assigned physical processors
-        for proc_idx in assigned_proc_indices:
-            processor_finish_times[proc_idx] = segment_end_time
-
-        scheduled_outputs.append(
-            ScheduledSegmentOutput(
-                task_id=segment_to_place.task_id,
-                start_time=earliest_start_time,
-                end_time=segment_end_time,
-                num_processors=num_procs_needed,
+            return (
+                running_tasks[task_id]["processors_to_use"] + segment.processors
+                <= available_processors
             )
-        )
-        makespan = max(makespan, segment_end_time)
 
-    return scheduled_outputs, makespan
+        def can_schedule_without_constraints(seg_id: str) -> bool:
+            segment = segments[seg_id]
+            task_id = segment.task_id
+
+            if task_id not in running_tasks:
+                return True
+
+            return (
+                running_tasks[task_id]["processors_to_use"]
+                < self.task_info_map[task_id]["max_processors"]
+            )
+
+        for seg_id in segments_to_schedule:
+            if can_schedule_with_constraints(seg_id):
+                return seg_id
+
+        for seg_id in segments_to_schedule:
+            if can_schedule_without_constraints(seg_id):
+                return seg_id
+
+        logger.warning(
+            f"No possible segment found for {available_processors} processors, returning first element on the list"
+        )
+        return segments_to_schedule[0]
+
+    def _build_segments_dict(
+        self, segment_map: dict[str, list[Segment]]
+    ) -> dict[str, Segment]:
+        segments = {}
+        for task_segments in segment_map.values():
+            for seg in task_segments:
+                segments[seg.segment_id] = seg
+        return segments
+
+    def decode_solution(
+        self,
+        segment_map: dict[str, list[Segment]],
+        segment_order: list[str],
+        processors: int,
+    ) -> tuple[list[ScheduledSegmentOutput], float]:
+        schedule = []
+        segments = self._build_segments_dict(segment_map)
+        segments_to_schedule = segment_order.copy()
+
+        running_tasks = {}
+        free_processors = processors
+        current_interval_start = 0
+
+        # print(f"Segments to schedule: \n{segments_to_schedule}")
+        # print(f"Segments map: \n{segments}")
+
+        # Main scheduling loop
+        while segments_to_schedule:
+            if free_processors == 0:
+                running_tasks, free_processors, current_interval_start = (
+                    self._flush_running_tasks(
+                        current_interval_start, running_tasks, free_processors, schedule
+                    )
+                )
+
+            next_segment_id = self._find_next_segment(
+                segments, segments_to_schedule, running_tasks, free_processors
+            )
+
+            if next_segment_id is not None:
+                segments_to_schedule.remove(next_segment_id)
+                task_id = segments[next_segment_id].task_id
+                max_proc_number = min(
+                    free_processors,
+                    self.task_info_map[task_id]["max_processors"],
+                )
+
+                if task_id in running_tasks:
+                    new_processors_to_use = (
+                        max_proc_number - running_tasks[task_id]["processors_to_use"]
+                    )
+                    processors_to_use = (
+                        running_tasks[task_id]["processors_to_use"]
+                        + new_processors_to_use
+                    )
+                    current_work_amount = (
+                        running_tasks[task_id]["end_time"] - current_interval_start
+                    ) * self.task_info_map[task_id]["speed_up_factors"][
+                        running_tasks[task_id]["processors_to_use"] - 1
+                    ]
+                    new_work_amount = (
+                        current_work_amount
+                        + segments[next_segment_id].work_amount_segment
+                    )
+
+                    running_tasks[task_id]["processors_to_use"] = processors_to_use
+                    duration = get_segment_duration(
+                        task_id,
+                        new_work_amount,
+                        self.task_info_map,
+                        processors_to_use,
+                    )
+                    running_tasks[task_id]["end_time"] = (
+                        current_interval_start + duration
+                    )
+                else:
+                    new_processors_to_use = min(
+                        max_proc_number, segments[next_segment_id].processors
+                    )
+                    duration = get_segment_duration(
+                        task_id,
+                        segments[next_segment_id].work_amount_segment,
+                        self.task_info_map,
+                        new_processors_to_use,
+                    )
+                    running_tasks[task_id] = {
+                        "end_time": current_interval_start + duration,
+                        "processors_to_use": new_processors_to_use,
+                    }
+                    processors_to_use = new_processors_to_use
+
+                free_processors -= new_processors_to_use
+            else:
+                free_processors = 0
+                continue
+        # Finish started segments
+        while running_tasks:
+            while free_processors > 0:
+                task_to_expand = None
+
+                for task_id, task_info in running_tasks.items():
+                    if (
+                        task_info["processors_to_use"]
+                        < self.task_info_map[task_id]["max_processors"]
+                    ):
+                        task_to_expand = task_id
+                        break
+
+                if task_to_expand is not None:
+                    processors_to_add = min(
+                        self.task_info_map[task_to_expand]["max_processors"]
+                        - running_tasks[task_to_expand]["processors_to_use"],
+                        free_processors,
+                    )
+                    new_processors_to_use = (
+                        running_tasks[task_to_expand]["processors_to_use"]
+                        + processors_to_add
+                    )
+
+                    work_amount = (
+                        running_tasks[task_to_expand]["end_time"]
+                        - current_interval_start
+                    ) * self.task_info_map[task_to_expand]["speed_up_factors"][
+                        running_tasks[task_to_expand]["processors_to_use"] - 1
+                    ]
+
+                    new_duration = get_segment_duration(
+                        task_to_expand,
+                        work_amount,
+                        self.task_info_map,
+                        new_processors_to_use,
+                    )
+                    running_tasks[task_to_expand]["end_time"] = (
+                        current_interval_start + new_duration
+                    )
+                    running_tasks[task_to_expand]["processors_to_use"] = (
+                        new_processors_to_use
+                    )
+                    free_processors -= processors_to_add
+                else:
+                    break
+            running_tasks, free_processors, current_interval_start = (
+                self._flush_running_tasks(
+                    current_interval_start, running_tasks, free_processors, schedule
+                )
+            )
+
+        return schedule, current_interval_start
 
 
 def generate_initial_solution(
     task_info_map: dict[str, Any],
     m_total_processors: int,
-    initial_segments_per_task: int = 1,
+    initial_segments_per_task: int | None,
 ) -> tuple[dict[str, list[Segment]], list[str]]:
     """
     Generates an initial solution for the simulated annealing algorithm.
@@ -267,14 +395,6 @@ def get_neighbor_solution(
     if len(new_global_order) > 1:
         possible_moves.append(NeighborMoveType.CHANGE_ORDER_MOVE)
 
-    # print(f"Current global order: {current_global_order}\n")
-    # print(f"Current segments map: {current_segments_map}\n")
-    # print(f"Possible moves: {possible_moves}\n")
-    # print(f"Task info map: {task_info_map}\n")
-    # print(f"M total processors: {m_total_processors}\n")
-
-    # raise Exception("Stop here")
-
     has_segments = False
     has_multiple_segments = False
 
@@ -295,7 +415,9 @@ def get_neighbor_solution(
 
     move_type = random.choice(possible_moves)
 
-    def find_segment_and_task(segment_id_to_find, segments_map):
+    def find_segment_and_task(
+        segment_id_to_find: str, segments_map: dict[str, list[Segment]]
+    ) -> tuple[str, Segment] | tuple[None, None]:
         for task_id, segment_list in segments_map.items():
             for segment in segment_list:
                 if segment.segment_id == segment_id_to_find:
@@ -304,24 +426,23 @@ def get_neighbor_solution(
 
     match move_type:
         case NeighborMoveType.CHANGE_ALLOC:
-            segment_id_to_modify = random.choice(new_global_order)
-            task_id, segment_obj = find_segment_and_task(
-                segment_id_to_modify, new_segments_map
-            )
-            if segment_obj:
+            segment_id = random.choice(new_global_order)
+            task_id, segment = find_segment_and_task(segment_id, new_segments_map)
+            if segment:
                 max_p_task = task_info_map[task_id]["max_processors"]
-                new_procs = segment_obj.processors
+                new_procs = segment.processors
+
                 # Try to ensure a change if multiple options exist
                 if min(max_p_task, m_total_processors) > 1:
                     while (
-                        new_procs == segment_obj.processors
+                        new_procs == segment.processors
                     ):  # Ensure it changes if possible
                         new_procs = random.randint(
                             1, min(max_p_task, m_total_processors)
                         )
                 else:  # Only 1 processor option
                     new_procs = 1
-                segment_obj.processors = new_procs
+                segment.processors = new_procs
 
         case NeighborMoveType.CHANGE_ORDER_SWAP if len(new_global_order) >= 2:
             idx1, idx2 = random.sample(range(len(new_global_order)), 2)
@@ -477,14 +598,17 @@ def simulated_annealing(
         processor_num,
         initial_segments_per_task=initial_segments_per_task,
     )
-    current_schedule_list, current_makespan = decode_solution(
-        current_segments_map, current_global_order, processor_num, task_info_map
+
+    segment_scheduler = SegmentScheduler(processor_num, task_info_map)
+
+    current_schedule_list, current_makespan = segment_scheduler.decode_solution(
+        current_segments_map, current_global_order, processor_num
     )
 
-    # best_segments_map = copy.deepcopy(current_segments_map)
-    # best_global_order = list(current_global_order)
     best_makespan = current_makespan
-    best_schedule_list = list(current_schedule_list)
+    best_segments_map = current_segments_map
+    best_global_order = current_global_order
+    best_schedule_list = current_schedule_list
 
     temperature = initial_temperature
     total_iterations = 0
@@ -498,15 +622,13 @@ def simulated_annealing(
                 current_segments_map, current_global_order, task_info_map, processor_num
             )
 
-            neighbor_schedule_list, neighbor_makespan = decode_solution(
-                neighbor_segments_map,
-                neighbor_global_order,
-                processor_num,
-                task_info_map,
+            neighbor_schedule_list, neighbor_makespan = (
+                segment_scheduler.decode_solution(
+                    neighbor_segments_map,
+                    neighbor_global_order,
+                    processor_num,
+                )
             )
-
-            if neighbor_makespan == float("inf"):
-                continue
 
             delta_E = neighbor_makespan - current_makespan
 
@@ -517,10 +639,10 @@ def simulated_annealing(
                 current_schedule_list = neighbor_schedule_list
 
                 if current_makespan < best_makespan:
-                    best_segments_map = copy.deepcopy(current_segments_map)
-                    best_global_order = list(current_global_order)
                     best_makespan = current_makespan
-                    best_schedule_list = list(current_schedule_list)
+                    best_segments_map = current_segments_map
+                    best_global_order = current_global_order
+                    best_schedule_list = current_schedule_list
             else:
                 boltzman_prob = math.exp(-delta_E / temperature)
 
@@ -539,27 +661,14 @@ def simulated_annealing(
                     f"Iter {total_iterations}, T={temperature:.2f}, Best makespan={best_makespan:.4f}"
                 )
 
-    final_segments_map, final_global_order = (
-        best_segments_map,
-        best_global_order,
-    )
+    print(f"\nFinished SA. Total iterations: {total_iterations}")
 
-    # final_schedule_compact_list, final_makespan_compact = (
-    #     decode_solution_with_gap_filling(
-    #         final_segments_map, final_global_order, processor_num, task_info_map
-    #     )
-    # )
+    interval_list = [s.to_dict() for s in best_schedule_list]
+    interval_list_group = group_intervals(interval_list)
 
-    # print(final_segments_map, final_global_order)
-
-    # print(f"\nFinished SA. Total iterations: {total_iterations}")
-
-    result = FinalSchedule(
-        schedule=[s.to_dict() for s in best_schedule_list],
-        makespan=best_makespan if best_makespan else 0,
+    return FinalSchedule(
+        schedule=interval_list_group,
+        makespan=best_makespan,
         num_processors=processor_num,
         num_tasks=n_tasks,
     )
-
-    # return result
-    return final_segments_map, final_global_order, result

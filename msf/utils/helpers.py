@@ -42,7 +42,7 @@ def pretty_print_schedule(algorithm_name: str, schedule: FinalSchedule) -> None:
     print("-" * 20)
 
 
-def read_instance_data(file_path: str | None = None) -> dict | None:
+def read_instance_data(file_path: str | None = None) -> dict:
     directory = settings.instances_dir
 
     # if file_path is None:
