@@ -1,5 +1,6 @@
 import json
 import os
+from collections import defaultdict
 
 from loguru import logger
 
@@ -14,7 +15,7 @@ def read_schdeule_from_file(filename: str) -> FinalSchedule:
         return FinalSchedule(**json.load(f))
 
 
-def unify_speedup_factors(speedup_factors: list[float], m: int):
+def unify_speedup_factors(speedup_factors: list[float], m: int) -> list[float]:
     if len(speedup_factors) < m:
         last_val = speedup_factors[-1] if speedup_factors else 0
         speedup_factors.extend([last_val] * (m - len(speedup_factors)))
@@ -23,7 +24,7 @@ def unify_speedup_factors(speedup_factors: list[float], m: int):
     return speedup_factors
 
 
-def pretty_print_schedule(algorithm_name: str, schedule: FinalSchedule):
+def pretty_print_schedule(algorithm_name: str, schedule: FinalSchedule) -> None:
     print("-" * 20)
     print(f"{algorithm_name} makespan: {schedule.makespan:.5f}")
 
@@ -62,7 +63,7 @@ def read_instance_data(file_path: str | None = None) -> dict | None:
         "tasks": {
             "T1": {
                 "work_amount": 100,
-                "speed_up_factors": [1.0, 1.9, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
+                "speed_up_factors": [1.0, 1.9, 2.0, 2.5, 2.5, 2.5, 2.5, 2.5],
             },
             "T2": {
                 "work_amount": 80,
@@ -84,7 +85,7 @@ def read_instance_data(file_path: str | None = None) -> dict | None:
     }
 
 
-def save_schedule(schedule: FinalSchedule, filename: str):
+def save_schedule(schedule: FinalSchedule, filename: str) -> None:
     directory = settings.schedules_dir
     filename = os.path.join(directory, filename)
 
@@ -101,3 +102,28 @@ def save_schedule(schedule: FinalSchedule, filename: str):
             logger.info(f"Schedule saved to {filename}")
     except Exception as e:
         logger.error(f"Failed to save schedule to {filename}: {e}")
+
+
+def group_intervals(records: list[dict]) -> list[dict]:
+    grouped = defaultdict(int)
+
+    for record in records:
+        task_id = record["task_id"]
+        start_time = record["start_time"]
+        end_time = record["end_time"]
+        num_proc = record["num_processors"]
+
+        key = (task_id, start_time, end_time)
+        grouped[key] += num_proc
+
+    result = [
+        {
+            "task_id": task_id,
+            "start_time": start,
+            "end_time": end,
+            "num_processors": num_proc,
+        }
+        for (task_id, start, end), num_proc in grouped.items()
+    ]
+
+    return result

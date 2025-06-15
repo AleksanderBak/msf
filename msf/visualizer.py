@@ -1,5 +1,6 @@
 import collections
 import os
+from typing import Any
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -17,69 +18,161 @@ class Visualizer:
     def __init__(self):
         pass
 
+    # def _create_consistent_interval(
+    #     self,
+    #     prev_interval_data: list[dict[str, Any]],
+    #     current_task_requirements: dict[str, int],
+    #     t_start: float,
+    #     t_end: float,
+    # ) -> list:
+    #     if not prev_interval_data or not prev_interval_data[0]:
+    #         new_schedule = []
+    #         next_proc_id = 0
+    #         for task_id, count in sorted(current_task_requirements.items()):
+    #             for _ in range(count):
+    #                 new_schedule.append(
+    #                     {
+    #                         "processor_id": next_proc_id,
+    #                         "start_time": t_start,
+    #                         "end_time": t_end,
+    #                         "task_id": task_id,
+    #                     }
+    #                 )
+    #                 next_proc_id += 1
+    #         return [new_schedule]
+
+    #     last_schedule = prev_interval_data[0]
+    #     previous_assignments = collections.defaultdict(list)
+    #     all_previous_procs = set()
+    #     for assignment in last_schedule:
+    #         previous_assignments[assignment["task_id"]].append(
+    #             assignment["processor_id"]
+    #         )
+    #         all_previous_procs.add(assignment["processor_id"])
+
+    #     for task_id in previous_assignments:
+    #         previous_assignments[task_id].sort()
+
+    #     new_assignments = {}
+    #     available_processors = []
+    #     processors_to_keep = set()
+
+    #     for task_id, required_count in current_task_requirements.items():
+    #         if task_id in previous_assignments:
+    #             old_procs = previous_assignments[task_id]
+    #             procs_to_use = old_procs[:required_count]
+    #             procs_to_free = old_procs[required_count:]
+    #             new_assignments[task_id] = procs_to_use
+    #             processors_to_keep.update(procs_to_use)
+    #             available_processors.extend(procs_to_free)
+
+    #     freed_by_task_disappearance = all_previous_procs - processors_to_keep
+    #     available_processors.extend(list(freed_by_task_disappearance))
+    #     available_processors.sort()
+
+    #     for task_id, required_count in current_task_requirements.items():
+    #         needed_more = required_count - len(new_assignments.get(task_id, []))
+    #         if needed_more > 0:
+    #             procs_to_add = available_processors[:needed_more]
+    #             available_processors = available_processors[needed_more:]
+    #             new_assignments.setdefault(task_id, []).extend(procs_to_add)
+
+    #     next_interval_schedule = []
+    #     for task_id, proc_list in new_assignments.items():
+    #         for proc_id in proc_list:
+    #             next_interval_schedule.append(
+    #                 {
+    #                     "processor_id": proc_id,
+    #                     "start_time": t_start,
+    #                     "end_time": t_end,
+    #                     "task_id": task_id,
+    #                 }
+    #             )
+    #     next_interval_schedule.sort(key=lambda x: x["processor_id"])
+    #     return [next_interval_schedule]
+
     def _create_consistent_interval(
         self,
-        prev_interval_data,
-        current_task_requirements,
-        t_start,
-        t_end,
-    ):
+        prev_interval_data: list[dict[str, Any]],
+        current_task_requirements: dict[str, int],
+        t_start: float,
+        t_end: float,
+    ) -> list:
+        """
+        Assign tasks to processors with minimal switches between intervals.
+        Tasks stay on their previous processors when possible.
+        """
+
+        # If no previous data, start fresh
         if not prev_interval_data or not prev_interval_data[0]:
-            new_schedule = []
-            next_proc_id = 0
+            schedule = []
+            proc_id = 0
             for task_id, count in sorted(current_task_requirements.items()):
                 for _ in range(count):
-                    new_schedule.append(
+                    schedule.append(
                         {
-                            "processor_id": next_proc_id,
+                            "processor_id": proc_id,
                             "start_time": t_start,
                             "end_time": t_end,
                             "task_id": task_id,
                         }
                     )
-                    next_proc_id += 1
-            return [new_schedule]
+                    proc_id += 1
+            return [schedule]
 
-        last_schedule = prev_interval_data[0]
-        previous_assignments = collections.defaultdict(list)
-        all_previous_procs = set()
-        for assignment in last_schedule:
-            previous_assignments[assignment["task_id"]].append(
-                assignment["processor_id"]
-            )
-            all_previous_procs.add(assignment["processor_id"])
+        # Get previous assignments grouped by task
+        prev_by_task = collections.defaultdict(list)
+        all_used_procs = set()
 
-        for task_id in previous_assignments:
-            previous_assignments[task_id].sort()
+        for assignment in prev_interval_data[0]:
+            prev_by_task[assignment["task_id"]].append(assignment["processor_id"])
+            all_used_procs.add(assignment["processor_id"])
 
-        new_assignments = {}
-        available_processors = []
-        processors_to_keep = set()
+        # Sort processor lists for consistent ordering
+        for task_id in prev_by_task:
+            prev_by_task[task_id].sort()
 
-        for task_id, required_count in current_task_requirements.items():
-            if task_id in previous_assignments:
-                old_procs = previous_assignments[task_id]
-                procs_to_use = old_procs[:required_count]
-                procs_to_free = old_procs[required_count:]
-                new_assignments[task_id] = procs_to_use
-                processors_to_keep.update(procs_to_use)
-                available_processors.extend(procs_to_free)
+        new_schedule = []
+        used_procs = set()
+        next_free_proc = max(all_used_procs) + 1 if all_used_procs else 0
 
-        freed_by_task_disappearance = all_previous_procs - processors_to_keep
-        available_processors.extend(list(freed_by_task_disappearance))
-        available_processors.sort()
+        # First, determine which processors each task will keep from previous interval
+        task_assignments = {}
+        for task_id, needed_count in current_task_requirements.items():
+            prev_procs = prev_by_task.get(task_id, [])
+            keep_procs = prev_procs[:needed_count]  # Keep up to needed_count
+            task_assignments[task_id] = keep_procs
+            used_procs.update(keep_procs)
 
-        for task_id, required_count in current_task_requirements.items():
-            needed_more = required_count - len(new_assignments.get(task_id, []))
-            if needed_more > 0:
-                procs_to_add = available_processors[:needed_more]
-                available_processors = available_processors[needed_more:]
-                new_assignments.setdefault(task_id, []).extend(procs_to_add)
+        # Now assign additional processors to tasks that need more
+        for task_id, needed_count in current_task_requirements.items():
+            current_procs = task_assignments[task_id]
+            additional_needed = needed_count - len(current_procs)
 
-        next_interval_schedule = []
-        for task_id, proc_list in new_assignments.items():
+            if additional_needed > 0:
+                # Find available processors (previously used but not currently assigned)
+                available_procs = []
+                for proc_id in sorted(all_used_procs):
+                    if (
+                        proc_id not in used_procs
+                        and len(available_procs) < additional_needed
+                    ):
+                        available_procs.append(proc_id)
+
+                # Create new processors if still needed
+                while len(available_procs) < additional_needed:
+                    available_procs.append(next_free_proc)
+                    next_free_proc += 1
+
+                # Add the additional processors
+                additional_procs = available_procs[:additional_needed]
+                task_assignments[task_id].extend(additional_procs)
+                used_procs.update(additional_procs)
+
+        # Create schedule entries
+        for task_id, proc_list in task_assignments.items():
             for proc_id in proc_list:
-                next_interval_schedule.append(
+                new_schedule.append(
                     {
                         "processor_id": proc_id,
                         "start_time": t_start,
@@ -87,8 +180,10 @@ class Visualizer:
                         "task_id": task_id,
                     }
                 )
-        next_interval_schedule.sort(key=lambda x: x["processor_id"])
-        return [next_interval_schedule]
+
+        # Sort by processor ID for consistent output
+        new_schedule.sort(key=lambda x: x["processor_id"])
+        return [new_schedule]
 
     def visualize_schedule_by_processor(
         self,
@@ -151,6 +246,9 @@ class Visualizer:
                 prev_interval_data = []
                 continue
 
+            # print(f"Current task requirements: {current_task_requirements}")
+            # print(f"Prev interval data: {prev_interval_data}")
+
             next_interval = self._create_consistent_interval(
                 prev_interval_data,
                 current_task_requirements,
@@ -160,6 +258,8 @@ class Visualizer:
             prev_interval_data = next_interval
 
             used_processors = set()
+
+            # print(f"Next interval: {next_interval[0]}")
             for assignment in next_interval[0]:
                 used_processors.add(assignment["processor_id"])
 

@@ -29,30 +29,32 @@ if __name__ == "__main__":
     h1_schedule = h1_algorithm(m=data["m"], n=data["n"], tasks_dict=data["tasks"])
 
     # ============= Run Simulated Annealing =============
-    sa_schedule = simulated_annealing(
-        instance_data=data,
-        initial_temperature=50,
-        final_temperature=5,
-        cooling_rate=0.98,
-        iterations_per_temperature=50,
-        initial_segments_per_task=2,
-    )
+    # sa_schedule = simulated_annealing(
+    #     instance_data=data,
+    #     initial_temperature=50,
+    #     final_temperature=5,
+    #     cooling_rate=0.98,
+    #     iterations_per_temperature=50,
+    #     initial_segments_per_task=2,
+    # )
 
     # ============= Save Schedule =============
     # save_schedule(h1_schedule, "h1_schedule.json")
-    save_schedule(sa_schedule, "sa_schedule.json")
+    # save_schedule(sa_schedule, "sa_schedule.json")
 
     # ============= Visualize Schedules =============
     visualizer = Visualizer()
 
-    visualizer.visualize_schedule_by_processor(h1_schedule, filename="h1_schedule.png")
     visualizer.visualize_schedule_by_processor(
-        sa_schedule, filename="sa_schedule_weird.png"
+        h1_schedule, filename="h1_schedule_new_test.png"
     )
+    # visualizer.visualize_schedule_by_processor(
+    #     sa_schedule, filename="sa_schedule_weird.png"
+    # )
 
-    visualizer.visualize_schedule_by_processor(
-        upperbound_schedule, filename="upperbound_schedule.png"
-    )
+    # visualizer.visualize_schedule_by_processor(
+    #     upperbound_schedule, filename="upperbound_schedule.png"
+    # )
 
     # random.seed(42)
     # final_schedule = read_schdeule_from_file("h1_schedule_2.json")

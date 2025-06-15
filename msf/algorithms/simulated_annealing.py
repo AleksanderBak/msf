@@ -16,7 +16,9 @@ NEXT_SEGMENT_UID_COUNTER = 0
 class Segment:
     """Represents a portion of a task's execution with a fixed processor allocation."""
 
-    def __init__(self, task_id, segment_id, processors, work_amount_segment):
+    def __init__(
+        self, task_id: str, segment_id: str, processors: int, work_amount_segment: float
+    ):
         self.task_id = task_id
         self.segment_id = segment_id
         self.processors = processors
@@ -25,8 +27,8 @@ class Segment:
 
     def __repr__(self):
         return (
-            f"Segment(id={self.segment_id}, task={self.task_id}, "
-            f"P={self.processors}, W={self.work_amount_segment:.4f})"
+            f"Segment(segment_id={self.segment_id}, task_id={self.task_id}, "
+            f"processors={self.processors}, work_amount_segment={self.work_amount_segment})"
         )
 
 
@@ -42,8 +44,8 @@ class ScheduledSegmentOutput:
     def to_dict(self):
         return {
             "task_id": self.task_id,
-            "start_time": round(self.start_time, 4),  # Round for cleaner output
-            "end_time": round(self.end_time, 4),
+            "start_time": self.start_time,
+            "end_time": self.end_time,
             "num_processors": self.num_processors,
         }
 
@@ -60,38 +62,32 @@ class NeighborMoveType(str, Enum):
 
 
 def get_next_segment_uid() -> str:
-    """Returns a unique identifier for a segment."""
     global NEXT_SEGMENT_UID_COUNTER
     NEXT_SEGMENT_UID_COUNTER += 1
     return f"s{NEXT_SEGMENT_UID_COUNTER}"
 
 
-# --- Instance Data Handling ---
-def load_instance_data(instance_json):
-    """Loads and pre-processes instance data."""
+def load_instance_data(instance_json) -> tuple[int, int, dict[str, Any]]:
     n_tasks = instance_json["n"]
     m_processors = instance_json["m"]
     task_details_map = {}
     for task_id, details in instance_json["tasks"].items():
-        # Ensure speed_up_factors array covers up to m_processors
-        suf = list(details["speed_up_factors"])  # Make a mutable copy
-        if len(suf) < m_processors:
-            last_speedup = suf[-1] if suf else 1.0  # Fallback if empty
-            suf.extend([last_speedup] * (m_processors - len(suf)))
+        best_speedup = 1.0
+        best_speedup_idx = 0
+        for idx, speedup_factor in enumerate(details["speed_up_factors"]):
+            if speedup_factor > best_speedup:
+                best_speedup = speedup_factor
+                best_speedup_idx = idx
 
         task_details_map[task_id] = {
             "total_work_amount": details["work_amount"],
-            # 0-indexed: speed_up_factors[p-1] for p processors
-            "speed_up_factors": suf[:m_processors],
-            "max_allocatable_processors": len(
-                details["speed_up_factors"]
-            ),  # Original max for this task
+            "speed_up_factors": details["speed_up_factors"],
+            "max_processors": best_speedup_idx + 1,
         }
     return n_tasks, m_processors, task_details_map
 
 
-def get_segment_duration(segment, task_info_map):
-    """Calculates duration of a segment given its work and processor allocation."""
+def get_segment_duration(segment: Segment, task_info_map: dict[str, Any]) -> float:
     task_id = segment.task_id
     speedup_idx = segment.processors - 1
     speedup = task_info_map[task_id]["speed_up_factors"][speedup_idx]
@@ -232,7 +228,7 @@ def generate_initial_solution(
         for _ in range(num_initial_segments):
             seg_id = get_next_segment_uid()
             # Ensure initial proc alloc is valid for the task and system
-            max_p_task_can_use = info["max_allocatable_processors"]
+            max_p_task_can_use = info["max_processors"]
             proc_alloc = random.randint(1, min(max_p_task_can_use, m_total_processors))
 
             segment = Segment(task_id, seg_id, proc_alloc, work_per_segment)
@@ -313,7 +309,7 @@ def get_neighbor_solution(
                 segment_id_to_modify, new_segments_map
             )
             if segment_obj:
-                max_p_task = task_info_map[task_id]["max_allocatable_processors"]
+                max_p_task = task_info_map[task_id]["max_processors"]
                 new_procs = segment_obj.processors
                 # Try to ensure a change if multiple options exist
                 if min(max_p_task, m_total_processors) > 1:
@@ -355,7 +351,7 @@ def get_neighbor_solution(
                 work1 = original_work * split_ratio
                 work2 = original_work - work1
 
-                max_p_task = task_info_map[task_id]["max_allocatable_processors"]
+                max_p_task = task_info_map[task_id]["max_processors"]
                 procs1 = random.randint(1, min(max_p_task, m_total_processors))
                 procs2 = random.randint(1, min(max_p_task, m_total_processors))
 
@@ -393,9 +389,7 @@ def get_neighbor_solution(
                 merged_work = (
                     segment_1.work_amount_segment + segment_2.work_amount_segment
                 )
-                max_p_task = task_info_map[task_to_merge_in][
-                    "max_allocatable_processors"
-                ]
+                max_p_task = task_info_map[task_to_merge_in]["max_processors"]
                 merged_procs = random.randint(1, min(max_p_task, m_total_processors))
 
                 merged_segment_id = get_next_segment_uid()
@@ -556,8 +550,9 @@ def simulated_annealing(
     #     )
     # )
 
-    print(final_segments_map, final_global_order)
-    print(f"\nFinished SA. Total iterations: {total_iterations}")
+    # print(final_segments_map, final_global_order)
+
+    # print(f"\nFinished SA. Total iterations: {total_iterations}")
 
     result = FinalSchedule(
         schedule=[s.to_dict() for s in best_schedule_list],
@@ -566,4 +561,5 @@ def simulated_annealing(
         num_tasks=n_tasks,
     )
 
-    return result
+    # return result
+    return final_segments_map, final_global_order, result

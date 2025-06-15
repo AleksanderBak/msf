@@ -1,0 +1,130 @@
+from msf.algorithms.simulated_annealing import Segment
+
+segments_map = {
+    "T1": [
+        Segment(
+            segment_id="s2069",
+            task_id="T1",
+            processors=2,
+            work_amount_segment=99.99999999999997,
+        )
+    ],
+    "T2": [
+        Segment(
+            segment_id="s2039", task_id="T2", processors=2, work_amount_segment=80.0
+        )
+    ],
+    "T3": [
+        Segment(
+            segment_id="s2074",
+            task_id="T3",
+            processors=4,
+            work_amount_segment=120.0,
+        )
+    ],
+    "T4": [
+        Segment(
+            segment_id="s2027", task_id="T4", processors=3, work_amount_segment=50.0
+        )
+    ],
+    "T5": [
+        Segment(
+            segment_id="s2043",
+            task_id="T5",
+            processors=5,
+            work_amount_segment=4.88965119840482,
+        ),
+        Segment(
+            segment_id="s2076",
+            task_id="T5",
+            processors=1,
+            work_amount_segment=15.59342660696153,
+        ),
+        Segment(
+            segment_id="s2080",
+            task_id="T5",
+            processors=1,
+            work_amount_segment=16.675169334339135,
+        ),
+        Segment(
+            segment_id="s2082",
+            task_id="T5",
+            processors=2,
+            work_amount_segment=1.1400544832596542,
+        ),
+        Segment(
+            segment_id="s2084",
+            task_id="T5",
+            processors=3,
+            work_amount_segment=15.32479524940029,
+        ),
+        Segment(
+            segment_id="s2085",
+            task_id="T5",
+            processors=1,
+            work_amount_segment=1.1687161883894757,
+        ),
+        Segment(
+            segment_id="s2089",
+            task_id="T5",
+            processors=1,
+            work_amount_segment=12.7473800566725,
+        ),
+        Segment(
+            segment_id="s2093",
+            task_id="T5",
+            processors=2,
+            work_amount_segment=37.86728882631493,
+        ),
+        Segment(
+            segment_id="s2094",
+            task_id="T5",
+            processors=6,
+            work_amount_segment=22.09775038719311,
+        ),
+        Segment(
+            segment_id="s2098",
+            task_id="T5",
+            processors=6,
+            work_amount_segment=15.988348761186263,
+        ),
+        Segment(
+            segment_id="s2100",
+            task_id="T5",
+            processors=3,
+            work_amount_segment=23.166713719539487,
+        ),
+        Segment(
+            segment_id="s2101",
+            task_id="T5",
+            processors=2,
+            work_amount_segment=16.954585219710154,
+        ),
+        Segment(
+            segment_id="s2102",
+            task_id="T5",
+            processors=4,
+            work_amount_segment=16.386119968628705,
+        ),
+    ],
+}
+
+segment_order = [
+    "s2093",
+    "s2094",
+    "s2080",
+    "s2039",
+    "s2085",
+    "s2074",
+    "s2089",
+    "s2082",
+    "s2100",
+    "s2101",
+    "s2102",
+    "s2043",
+    "s2098",
+    "s2084",
+    "s2027",
+    "s2076",
+    "s2069",
+]
