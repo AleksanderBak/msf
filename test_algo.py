@@ -56,12 +56,8 @@ class SegmentScheduler:
         running_tasks: dict[str, Any],
         free_processors: int,
     ) -> tuple[dict[str, Any], int, float]:
-        print(
-            f"\n=========Scheduling segments at time {current_interval_start}========"
-        )
         tasks_to_end = []
         current_interval_end = min(task["end_time"] for task in running_tasks.values())
-        print(f"Current interval end: {current_interval_end}\n")
 
         for task_id, task_info in running_tasks.items():
             self.schedule.append(
@@ -73,7 +69,6 @@ class SegmentScheduler:
                 )
             )
             if task_info["end_time"] == current_interval_end:
-                print(f"Ending task {task_id}")
                 tasks_to_end.append(task_id)
                 free_processors += task_info["processors_to_use"]
 
@@ -130,6 +125,19 @@ class SegmentScheduler:
 
             if segment_candidate is None:
                 print("No segment candidate found")
+                for seg_id in segments_to_schedule:
+                    task_id = segments[seg_id].task_id
+                    if task_id not in running_tasks:
+                        segment_candidate = seg_id
+                        break
+                    else:
+                        if (
+                            running_tasks[task_id]["processors_to_use"]
+                            < task_info_map[task_id]["max_processors"]
+                        ):
+                            segment_candidate = seg_id
+                            break
+
                 segment_candidate = segments_to_schedule[0]
                 print(f"Segment candidate: {segment_candidate}")
 
@@ -143,15 +151,20 @@ class SegmentScheduler:
                 )
 
                 if task_id in running_tasks:
-                    print(f"Task {task_id} is already running")
-
-                    new_processors_to_use = min(
-                        max_proc_number, segments[seg_id].processors
+                    print(
+                        f"Task {task_id} already running on {running_tasks[task_id]['processors_to_use']}/{task_info_map[task_id]['max_processors']}"
                     )
+
+                    new_processors_to_use = (
+                        max_proc_number - running_tasks[task_id]["processors_to_use"]
+                    )
+                    print(f"Can use {new_processors_to_use} processors")
                     processors_to_use = (
                         running_tasks[task_id]["processors_to_use"]
                         + new_processors_to_use
                     )
+
+                    print(f"New processors: {processors_to_use}")
 
                     current_work_amount = (
                         running_tasks[task_id]["end_time"] - current_interval_start
@@ -169,12 +182,6 @@ class SegmentScheduler:
                         new_work_amount,
                         task_info_map,
                         processors_to_use,
-                    )
-                    print(
-                        f"Current task {task_id} end time: {running_tasks[task_id]['end_time']}\n"
-                        f"Current interval start: {current_interval_start}\n"
-                        f"Duration: {duration}\n"
-                        f"New end time: {current_interval_start + duration}\n"
                     )
                     running_tasks[task_id]["end_time"] = (
                         current_interval_start + duration
@@ -196,7 +203,6 @@ class SegmentScheduler:
                     }
                     processors_to_use = new_processors_to_use
 
-                print(f"Using {processors_to_use} processors for segment {seg_id}")
                 free_processors -= new_processors_to_use
             else:
                 print("No segment candidate found")
