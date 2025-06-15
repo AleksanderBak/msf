@@ -8,7 +8,7 @@ from msf.config.settings import settings
 from msf.utils.models import FinalSchedule
 
 
-def read_schdeule_from_file(filename: str) -> FinalSchedule:
+def read_schedule_from_file(filename: str) -> FinalSchedule:
     directory = settings.schedules_dir
     filename = os.path.join(directory, filename)
     with open(filename, "r") as f:
@@ -42,11 +42,8 @@ def pretty_print_schedule(algorithm_name: str, schedule: FinalSchedule) -> None:
     print("-" * 20)
 
 
-def read_instance_data(file_path: str | None = None) -> dict:
+def read_instance_data(file_path: str) -> dict:
     directory = settings.instances_dir
-
-    # if file_path is None:
-    #     return None
 
     # try:
     #     with open(os.path.join(directory, file_path), "r") as f:
@@ -83,25 +80,6 @@ def read_instance_data(file_path: str | None = None) -> dict:
             },
         },
     }
-
-
-def save_schedule(schedule: FinalSchedule, filename: str) -> None:
-    directory = settings.schedules_dir
-    filename = os.path.join(directory, filename)
-
-    schedule_dict = {
-        "num_processors": schedule.num_processors,
-        "num_tasks": schedule.num_tasks,
-        "makespan": schedule.makespan,
-        "schedule": schedule.schedule,
-    }
-
-    try:
-        with open(filename, "w") as f:
-            json.dump(schedule_dict, f, indent=2)
-            logger.info(f"Schedule saved to {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save schedule to {filename}: {e}")
 
 
 def group_intervals(records: list[dict]) -> list[dict]:

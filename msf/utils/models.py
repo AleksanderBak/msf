@@ -15,7 +15,7 @@ class FinalSchedule:
         self.num_processors = num_processors
         self.num_tasks = num_tasks
 
-    def save_to_file(self, filename: str):
+    def save_to_file(self, filename: str) -> None:
         directory = settings.schedules_dir
         filename = os.path.join(directory, filename)
 
